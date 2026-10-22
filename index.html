@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A* Snake Maze</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <h1>A* Snake Maze</h1>
+    <p class="lede">A snake hunts a goal through a maze. A* finds the cheapest route across the grid, diagonals included, then the route is straightened and rounded so the snake glides like a real one. Watch the search decide which cell to try next.</p>
+  </header>
+
+  <div class="layout">
+    <section class="stage">
+      <div class="toolbar">
+        <button id="run" class="primary" aria-pressed="false">Run</button>
+        <button id="step">Step</button>
+        <button id="reset">Reset</button>
+        <button id="newmaze">New maze</button>
+      </div>
+
+      <div class="board" id="boardwrap">
+        <canvas id="board" aria-label="Maze with snake and A* search"></canvas>
+        <canvas id="board3d" aria-label="3D view of the maze with snake and A* search" hidden></canvas>
+      </div>
+
+      <ul class="legend">
+        <li><span class="sw ring"></span>A (start)</li>
+        <li><span class="sw dot goal"></span>B (goal)</li>
+        <li><span class="sw open"></span>Open (discovered)</li>
+        <li><span class="sw closed"></span>Closed (explored)</li>
+        <li><span class="sw path"></span>Route the snake follows</li>
+        <li><span class="sw line"></span>A* grid path (before smoothing)</li>
+        <li><span class="sw wall"></span>Wall</li>
+        <li><span class="sw fog"></span>Not seen yet (explore mode)</li>
+      </ul>
+      <p class="hint">Click or drag on the maze to add or remove walls. Drag A or B to move them.</p>
+      <p class="log" id="log" aria-live="polite"></p>
+    </section>
+
+    <aside class="side">
+      <section>
+        <h2>Search</h2>
+        <dl class="stats">
+          <dt>Status</dt><dd id="st-status">-</dd>
+          <dt>Cells expanded</dt><dd id="st-expanded">0</dd>
+          <dt>Open cells</dt><dd id="st-open">0</dd>
+          <dt>Replans</dt><dd id="st-replans">-</dd>
+          <dt>Map seen</dt><dd id="st-seen">-</dd>
+          <dt>Travelled (this goal)</dt><dd id="st-travel">-</dd>
+          <dt>Grid path cost</dt><dd id="st-path">-</dd>
+          <dt>Route length</dt><dd id="st-route">-</dd>
+          <dt>Cheapest grid path</dt><dd id="st-opt">-</dd>
+          <dt>Goals eaten</dt><dd id="st-eaten">0</dd>
+          <dt>Cell under cursor</dt><dd id="st-hover">-</dd>
+        </dl>
+      </section>
+
+      <section>
+        <h2>Settings</h2>
+        <div class="field">
+          <label for="view">View</label>
+          <select id="view">
+            <option value="2d" selected>2D (flat, shows every cell)</option>
+            <option value="overview">3D overview</option>
+            <option value="chase">3D chase camera (follows the snake)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="mode">Snake</label>
+          <select id="mode">
+            <option value="plan" selected>Knows the maze (plans once)</option>
+            <option value="explore">Explores the maze (sees only nearby)</option>
+          </select>
+        </div>
+        <div class="field" id="visionfield">
+          <label for="vision">Vision (explore mode)</label>
+          <select id="vision">
+            <option value="short">Short (2.5 cells)</option>
+            <option value="medium" selected>Medium (3.5 cells)</option>
+            <option value="long">Long (6 cells)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="heur">Algorithm</label>
+          <select id="heur">
+            <option value="astar" selected>A* (Manhattan / octile distance)</option>
+            <option value="zero">Dijkstra (h = 0)</option>
+            <option value="weighted">Weighted A* (3 × the guess)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="moves">Movement</label>
+          <select id="moves">
+            <option value="eight" selected>8 directions (diagonal costs 1.41)</option>
+            <option value="four">4 directions (up, down, left, right)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="size">Maze size</label>
+          <select id="size">
+            <option value="small">Small (15 × 11)</option>
+            <option value="medium" selected>Medium (21 × 15)</option>
+            <option value="large">Large (31 × 21)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="speed">Speed</label>
+          <input id="speed" type="range" min="0" max="9" step="1" value="5">
+          <span class="readout" id="speedval"></span>
+        </div>
+        <label class="check"><input type="checkbox" id="smooth" checked> <span>Smooth the path (straight lines across open floor)</span></label>
+        <label class="check"><input type="checkbox" id="auto" checked> <span>Pick a new goal after the snake arrives</span></label>
+        <label class="check" id="bodylabel"><input type="checkbox" id="body"> <span>Snake body blocks the path (not in explore mode)</span></label>
+        <label class="check"><input type="checkbox" id="costs"> <span>Show g, h and f in cells</span></label>
+      </section>
+
+      <section class="explain">
+        <h2>How A* chooses</h2>
+        <p class="formula">f = g + h</p>
+        <dl>
+          <dt>g</dt> <dd>cost of the steps taken from A to this cell. A straight step costs 1 and a diagonal step costs 1.41.</dd>
+          <dt>h</dt> <dd>guess of the cost left to B, ignoring walls: Manhattan distance with 4 directions, octile distance with 8.</dd>
+          <dt>f</dt> <dd>g plus h, the predicted cost of a full route through this cell.</dd>
+        </dl>
+        <p>Each tick of the search:</p>
+        <ol>
+          <li>Take the open cell with the lowest f. Open cells are amber.</li>
+          <li>Mark it closed. Closed cells are blue.</li>
+          <li>Look at its neighbors. If a neighbor is floor and this route reaches it more cheaply, record the new g and remember this cell as its parent. A diagonal step is only allowed when both cells beside it are free.</li>
+          <li>Stop when the cell taken is B, then follow the parents back to A.</li>
+        </ol>
+        <p>After the goal is found:</p>
+        <ol>
+          <li>With "Smooth the path" on, any waypoint with a clear straight line past it is dropped. The dashed line is A*'s grid path and the solid line is the smoothed route.</li>
+          <li>Corners are rounded, but only as far as the snake still clears the walls.</li>
+          <li>The snake glides along the route at a steady speed, and its body follows the trail its head leaves.</li>
+        </ol>
+        <p>In explore mode the maze is hidden by fog and the snake sees only a few cells around it:</p>
+        <ol>
+          <li>It runs A* on its own map, where unseen cells count as open, so the plan heads straight for B.</li>
+          <li>It walks the plan a short way, then looks around and reveals what it can see.</li>
+          <li>If a newly seen wall blocks the plan, it runs A* again from where it stands.</li>
+          <li>It keeps its map, so later goals are easier. Compare "Travelled" with the shortest path to see what not knowing cost.</li>
+        </ol>
+        <p>Things to try:</p>
+        <ul>
+          <li>Switch Snake to "Explores the maze" and press Run.</li>
+          <li>Change Vision and watch the replans and the distance travelled change.</li>
+          <li>Switch Movement to 4 directions and compare the route.</li>
+          <li>Switch to Dijkstra and compare "Cells expanded".</li>
+          <li>Switch to Weighted A* and compare "Grid path cost" with "Cheapest grid path".</li>
+          <li>Turn off "Smooth the path" and watch the snake follow the grid.</li>
+          <li>Turn on "Show g, h and f in cells", then use Step.</li>
+        </ul>
+        <p>The snake's body is only decoration until you turn on "Snake body blocks the path".</p>
+      </section>
+    </aside>
+  </div>
+</main>
+
+<!-- Plain scripts, loaded in this order. They share globals, so the page also works when
+     opened straight from disk (file://), which ES modules would not. -->
+<script src="js/config.js"></script>
+<script src="js/heap.js"></script>
+<script src="js/maze.js"></script>
+<script src="js/path.js"></script>
+<script src="js/astar.js"></script>
+<script src="js/game.js"></script>
+<script src="js/vendor/three.min.js"></script>
+<script src="js/render.js"></script>
+<script src="js/render3d.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
